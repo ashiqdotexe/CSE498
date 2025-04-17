@@ -10,7 +10,7 @@ from utils.tensor_utils import pad_sequences_1d
 from cg_detr.span_utils import span_xx_to_cxw
 from torchtext import vocab
 import torch.nn as nn
-
+import os
 logger = logging.getLogger(__name__)
 
 TVSUM_SPLITS = {
@@ -75,6 +75,7 @@ class StartEndDataset(Dataset):
                  normalize_v=True, normalize_t=True, load_labels=True,
                  clip_len=2, max_windows=5, span_loss_type="l1", txt_drop_ratio=0,
                  dset_domain=None):
+        self.q_feat_dim = 512 
         self.dset_name = dset_name
         self.data_path = data_path
         self.data_ratio = data_ratio
@@ -403,32 +404,32 @@ class StartEndDataset(Dataset):
 
     def _get_query_feat_by_qid(self, qid):
         if self.dset_name == 'tvsum':
-            q_feat = np.load(join(self.q_feat_dir, "{}.npz".format(qid))) # 'token', 'text'
+            q_feat = np.load(join(self.q_feat_dir, "{}.npz".format(qid)))  # 'token', 'text'
             return torch.from_numpy(q_feat['token'])
-        # youtube-hl
+
         elif self.dset_name == 'youtube_uni':
             q_feat = np.load(join(self.q_feat_dir, "{}.npz".format(qid)))
             return torch.from_numpy(q_feat['last_hidden_state'])
-        
+
         elif self.dset_name in ['tacos', 'nlq']:
             q_feat_path = join(self.q_feat_dir, f"{qid}.npz")
-            q_feat = np.load(q_feat_path)[self.q_feat_type].astype(np.float32)
-            if self.q_feat_type == "last_hidden_state":
-                q_feat = q_feat[:self.max_q_l]
-            if self.normalize_t:
-                q_feat = l2_normalize_np_array(q_feat)
-            if self.txt_drop_ratio > 0:
-                q_feat = self.random_drop_rows(q_feat)
         else:
             # QVhighlight dataset
             q_feat_path = join(self.q_feat_dir, f"qid{qid}.npz")
-            q_feat = np.load(q_feat_path)[self.q_feat_type].astype(np.float32)
-            if self.q_feat_type == "last_hidden_state":
-                q_feat = q_feat[:self.max_q_l]
-            if self.normalize_t:
-                q_feat = l2_normalize_np_array(q_feat)
-            if self.txt_drop_ratio > 0:
-                q_feat = self.random_drop_rows(q_feat)
+
+        if not os.path.exists(q_feat_path):
+            print(f"[Warning] Query feature not found: {q_feat_path}. Skipping.")
+            return torch.zeros(self.max_q_l, self.q_feat_dim, dtype=torch.float32)
+
+        q_feat = np.load(q_feat_path)[self.q_feat_type].astype(np.float32)
+
+        if self.q_feat_type == "last_hidden_state":
+            q_feat = q_feat[:self.max_q_l]
+        if self.normalize_t:
+            q_feat = l2_normalize_np_array(q_feat)
+        if self.txt_drop_ratio > 0:
+            q_feat = self.random_drop_rows(q_feat)
+
         return torch.from_numpy(q_feat)  # (D, ) or (Lq, D)
 
     def random_drop_rows(self, embeddings):
